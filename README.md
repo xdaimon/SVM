@@ -2,17 +2,21 @@ This code is for a paper I wrote in my linear algebra class. The program demonst
 
 The program depends on the following libraries
 
-	glfw
-	GLEW
-	GLU
-	GL
-	pthread
+```
+glfw
+GLEW
+GLU
+GL
+pthread
+```
 
 You will need CMake installed to build the code.
 To build and run just
 
-	mkdir build
-	cd build/
-	cmake ..
-	make
-	./main
+```
+mkdir build
+cd build/
+cmake ..
+make
+./main
+```

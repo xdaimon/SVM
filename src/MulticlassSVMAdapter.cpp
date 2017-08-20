@@ -227,23 +227,23 @@ string SVM::MSVMAdapter::Generate3dShader() {
 			float b = dot( oc, rd );
 			float c = dot( oc, oc ) - radius*radius;
 			float h = b*b - c;
-			return vec3(-b-sqrt(max(h,0.)), -b+sqrt(max(h,0.)), h);
+			float sqmh = sqrt(max(h,0.));
+			return vec3(-b-sqmh, -b+sqmh, h);
 		}
 
-		// TODO inline?
-		int maxWeightAtPoint(in vec3 p) {
+		int maxClassAtPoint(in vec3 p) {
 			// Find the class of the point
-			int max_weight = -1;
+			int max_class = -1;
 			float score = 0.;
 			float max_score = -1e7;
 			for (int i = 0; i < numberOfClasses; ++i) {
-				score = dot(vec4(p,1.0), Weights[i]);
+				score = dot(vec4(p,1.0), Weights[i]); // I think we add a bias feature to p here.
 				if (score > max_score) {
 					max_score = score;
-					max_weight = i;
+					max_class = i;
 				}
 			}
-			return max_weight; 
+			return max_class;
 		}
 
 		#define withinBound(t) (t>BoundInterval.x&&t<BoundInterval.y)
@@ -295,35 +295,34 @@ string SVM::MSVMAdapter::Generate3dShader() {
 				}
 			}
 
-			// Find intersections with planes
+			// Find intersections with SVM decision boundaries
 			//
-			// f(x,y,z) is a coefficient matrix for a 3d function formed by the difference between two weight functions
-			// The solutions to f(x,y,z) == 0 form a plane. The plane can be parameterized by solving for z and forming
-			// the funtion h(x,y). Similarly for two planes the level set of their difference h0(x,y) - h1(x,y) == 0
-			// forms a line which can be parameterized by solving for y and forming the function g(x). Given this
-			// function g(x) we can perform antialiasing on the seams where two planes intersect
+			// f(x,y,z) is represented as a coefficient matrix and is formed by the
+			// difference between two functions (two parameter vectors, the SVM weights)
+			// The solutions to f(x,y,z) == 0 form a plane (the decision boundary)
+			// that we want to draw.
 			vec4 f;
 			vec3 P;
 			float t;
-			int max_weight;
-			// Find points on ray where any two scores are equivalent
+			int max_class;
+			// Find points on ray where any scores for two classes are equivalent
+			// and where those two scores are maximum
 			for (int i = 0; i < numberOfClasses; ++i) {
 				for (int j = numberOfClasses-1; j > i; --j) {
 					// Construct the coefficients for the linear function f(x,y,z)
 					f = Weights[i]-Weights[j];
 					// Let P be the z intercept of f(x,y,z) == 0
 					P = vec3(0.,0.,-f.w/f.z);
-					// Solve for t such that ro+rd*t is on the plane. normailzation of f.xyz (plane normal) cancels out
+					// Solve for t such that ro+rd*t is on the plane. Normailzation of f.xyz (plane normal) cancels out.
 					t = dot(P-ro, f.xyz)/dot(rd, f.xyz);
-					// We're only interested in intersections where the two score functions are maximum.
-					// checking for positive is needed when tracing the shadows??
-					if (withinBound(t) && t > 0.) {
-						// Try to ensure that intersections[k].ids.x holds the id of the max weight in the space before
-						// the ray hits the plane -> so find the maxWeight slightly before the intersection
-						max_weight = maxWeightAtPoint(ro+rd*(t-0.0001));
-						if (max_weight == j || max_weight == i) {
+					// Don't consider any intersections behind ray origin or outside our bounding volume.
+					if (withinBound(t) && t > 0.) { // checking for positive is needed when tracing the shadows??
+						// Try to ensure that intersections[k].ids.x holds the id of the max class in the space before
+						// the ray hits the plane -> so find the max class slightly before the intersection
+						max_class = maxClassAtPoint(ro+rd*(t-0.0001));
+						if (max_class == j || max_class == i) {
 							intersections[numIntersections].objectID = PLANE;
-							if (max_weight == j) {
+							if (max_class == j) {
 								intersections[numIntersections].ids.x=j;
 								intersections[numIntersections].ids.y=i;
 							} else {
@@ -362,7 +361,7 @@ string SVM::MSVMAdapter::Generate3dShader() {
 			vec3 diffComp = diffuseColor * diff;
 			vec3 specComp = vec3(spec);
 			vec3 ambientComp = diffuseColor*.3;
-			
+
 			// Add a flashlight with the camera
 			diffComp = mix(diffComp, abs(dot(rd, norm))*diffuseColor, .5);
 			ret = diffComp + .2 * specComp + ambientComp;
@@ -388,7 +387,19 @@ string SVM::MSVMAdapter::Generate3dShader() {
 
 		// k -> kth intersection
 		vec3 isolines(in vec3 ro, in vec3 rd, in int k, in vec3 baseColor) {
-			// AntiAlias the seams where two planes intersect
+
+			// f(x,y,z) is represented as a coefficient matrix and is formed by the
+			// difference between two functions (two parameter vectors, the SVM weights)
+			// The solutions to f(x,y,z) == 0 form a plane (the decision boundary)
+			// that we want to draw. This plane can be parameterized by solving for z
+			// and forming the coefficent matrix for a funtion h(x,y). We perform
+			// this process of finding the null set twice, for some f0(x,y,z) and
+			// f1(x,y,z), to obtain h0(x,y) and h1(x,y). The space of solutions to
+			// h0(x,y) - h1(x,y) == 0 forms a line which can be parameterized by
+			// solving for y and forming the function g(x). Given this function g(x)
+			// we can perform antialiasing on the seams where two planes intersect.
+
+			// AntiAlias the seams where two planes intersect, i.e where two decision boundaries meet.
 			// The goal is to find two points on this seam. A line is constructed from these points.
 			// The minimum distance between the primary rays intersecting point Q and
 			// the line is found and used for color mixing.
@@ -406,12 +417,13 @@ string SVM::MSVMAdapter::Generate3dShader() {
 			vec3 lineP0;
 			vec3 lineP1;
 			vec3 lineDir;
+			// We've already found the max class decision boundary during ray tracing.
 			Q = ro+rd*intersections[k].t;
 			f0 = Weights[intersections[k].ids.x]-Weights[intersections[k].ids.y];
 			// A point on the z0 plane is then vec3(s, t, dot(z0, vec3(s,t,1.)))
 			z0 = -vec3(f0.x,f0.y,f0.w)/f0.z;
 			for (int i = 0; i < numberOfClasses; ++i) {
-				//TODO project into screen plane and then take distances in order to smooth out the pixel mixing gradients
+				//TODO project into screen plane and then take distances in order to smooth out the pixel mixing gradients?
 
 				if (i == intersections[k].ids.y)
 					continue;
@@ -473,6 +485,7 @@ string SVM::MSVMAdapter::Generate3dShader() {
 			}
 			return color;
 		}
+
 		void main() {
 			vec3 ro;
 			vec3 rd;
