@@ -11,7 +11,7 @@ pthread
 ```
 
 You will need CMake installed to build the code.
-To build and run just
+To build and run just the following commands
 
 ```
 mkdir build
