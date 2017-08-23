@@ -20,3 +20,5 @@ cmake ..
 make
 ./main
 ```
+
+![Here is a preview of the app](demo.gif)
