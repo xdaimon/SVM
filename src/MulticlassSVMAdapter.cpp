@@ -295,25 +295,31 @@ string SVM::MSVMAdapter::Generate3dShader() {
 				}
 			}
 
-			// Find intersections with SVM decision boundaries
+			// Find intersections of ray(t) = ro+rd*t with SVM decision boundaries
 			//
-			// f(x,y,z) is represented as a coefficient matrix and is formed by the
+			// f(x,y,z) is a linear function and is represented as a coefficient matrix and is formed by the
 			// difference between two functions (two parameter vectors, the SVM weights)
-			// The solutions to f(x,y,z) == 0 form a plane (the decision boundary)
-			// that we want to draw.
+			// The solutions to f(x,y,z) == 0 form a plane (the decision boundary) that we want to draw.
 			vec4 f;
+			// A point on the plane f(x,y,z) == 0
+			// used to solve for t in ray(t) = ro+rd*t such that ray(t) is on the plane f(x,y,z) = 0
 			vec3 P;
 			float t;
 			int max_class;
-			// Find points on ray where any scores for two classes are equivalent
-			// and where those two scores are maximum
+			// Find points on ray where scores for any two classes are equivalent
+			// and where those two scores are greater than the scores for all other classes
 			for (int i = 0; i < numberOfClasses; ++i) {
+				// Don't check equality twice because if a == b, then we don't have to check that b == a
 				for (int j = numberOfClasses-1; j > i; --j) {
 					// Construct the coefficients for the linear function f(x,y,z)
 					f = Weights[i]-Weights[j];
 					// Let P be the z intercept of f(x,y,z) == 0
 					P = vec3(0.,0.,-f.w/f.z);
-					// Solve for t such that ro+rd*t is on the plane. Normailzation of f.xyz (plane normal) cancels out.
+					// Solve for t such that ro+rd*t is on the plane
+					// ((ro+rd*t)-P)*norm == 0
+					// (ro+rd*t)*Norm == P*norm
+					// t*rd*norm + ro*norm == P*norm
+					// t == (P-ro)*norm/(rd*norm)
 					t = dot(P-ro, f.xyz)/dot(rd, f.xyz);
 					// Don't consider any intersections behind ray origin or outside our bounding volume.
 					if (withinBound(t) && t > 0.) { // checking for positive is needed when tracing the shadows??
